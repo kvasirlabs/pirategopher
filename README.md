@@ -39,3 +39,7 @@ decryption key.
 ## License
 
 [LICENSE](LICENSE)
+
+## Credits
+
+Used https://github.com/mauri870/ransomware as a starting point
