@@ -5,9 +5,16 @@ hold people for ransom.
 
 ![Pirate Gopher](gopher_pirate.png)
 
-Future features:
+### Current Features
 
-* Create exe for Windows and ELF for Linux
+* Create ransomware EXE for Windows
+* Create C2 server for Linux
+* Use AES-256 for encrypting files
+* Encrypts wide variety of valuable file extensions (see `ransomware.go` for list of extensions)
+
+### Future Features:
+
+* Create ELF ransomware for Linux
 * Create C2 server for Linux
 * Embed executable into various payloads (Unicorn downgrade, Pdf, Office Macro, etc.)
 * Variety of crypto solutions
