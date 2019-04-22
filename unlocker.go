@@ -26,10 +26,36 @@ func StartUnlocker(key string) {
 		os.Exit(2)
 	}
 
-	go walkDrives(getDrives())
+	go func() {
+		dirs := getDrives()
+		for _, dir := range dirs {
+			filepath.Walk(dir, walkDriveToDecrypt)
+		}
+		close(fileTracker.Files)
+	}()
 	fileTracker.Add(numWorkers)
 	startDecryption(numWorkers, key)
 	fileTracker.Wait()
+}
+
+func walkDriveToDecrypt(path string, f os.FileInfo, err error) error {
+	if f.IsDir() {
+		for _, skipDir := range SkippedDirs {
+			if strings.Contains(filepath.Base(path), skipDir) {
+				return filepath.SkipDir
+			}
+		}
+	} else {
+		ext := filepath.Ext(path)
+		if ext == ".encrypted" {
+			fileTracker.Files <- &PirateFile{
+				FileInfo: f,
+				Extension: ext[1:],
+				FullPath: path,
+			}
+		}
+	}
+	return nil
 }
 
 func startDecryption(numWorkers int, key string) {
@@ -49,6 +75,7 @@ func decryptFiles(key string) {
 		}
 		newPath := strings.Replace(filepathWithoutExt, encodedFileName,
 			string(decodedFileName), - 1)
+
 		outFile, err := os.OpenFile(newPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
 			log.Println(err)

